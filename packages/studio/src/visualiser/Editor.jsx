@@ -218,7 +218,7 @@ const EditorView = observer(function Editor() {
           {store.ui.enableParams && store.defaultParams && (
             <ParamsEditor
               defaultParams={store.defaultParams}
-              onRun={store.process}
+              onRun={store.rebuild}
             />
           )}
         </InfoTopRight>

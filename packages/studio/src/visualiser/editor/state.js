@@ -7,29 +7,9 @@ import CodeState from "./code-state";
 import SelectedInfo from "./selected-info";
 
 import codeInit from "./codeInit";
-
-const inSeries = (func) => {
-  let refresh;
-  let currentlyRunning = false;
-
-  return async function () {
-    if (currentlyRunning) {
-      refresh = true;
-      return;
-    }
-    currentlyRunning = true;
-
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      refresh = false;
-      await func();
-
-      if (!refresh) break;
-    }
-
-    currentlyRunning = false;
-  };
-};
+import { applyPatchToConfig, mergeParams } from "../../external/params";
+import { createRebuildQueue } from "../../external/rebuildQueue";
+import { snapshotState } from "../../external/snapshot";
 
 const AppState = types
   .model("AppState", {
@@ -54,9 +34,21 @@ const AppState = types
     get codeInitialized() {
       return !!self.config.code;
     },
+
+    /**
+     * Full parameter object for the next rebuild. `undefined` keeps the
+     * script's own defaults. A stored patch is merged onto those defaults.
+     */
+    get effectiveParams() {
+      if (!self.paramOverrides) return undefined;
+      return mergeParams(self.scriptDefaults, null, self.paramOverrides);
+    },
   }))
   .volatile(() => ({
     defaultParams: null,
+    scriptDefaults: null,
+    paramOverrides: null,
+    externalCode: false,
     currentMesh: [],
     processing: false,
     shapeLoaded: false,
@@ -70,19 +62,66 @@ const AppState = types
       self.config.code = newCode;
     },
 
+    markExternalCode() {
+      self.externalCode = true;
+    },
+
+    setParamOverrides(params) {
+      self.paramOverrides = params ? { ...params } : null;
+    },
+
+    clearParamOverrides() {
+      self.paramOverrides = null;
+      if (self.scriptDefaults) {
+        self.defaultParams = self.scriptDefaults;
+      }
+    },
+
     initCode: flow(function* () {
       const code = yield codeInit();
+      // An outside caller may have loaded a script while the URL/local
+      // default was still being read. Keep that script.
+      if (self.externalCode) return;
       self.updateCode(code);
+    }),
+
+    ensureDefaultParams: flow(function* () {
+      if (self.scriptDefaults) return self.scriptDefaults;
+      try {
+        const extracted = yield api.extractDefaultParamsFromCode(
+          self.currentValues.code
+        );
+        self.scriptDefaults = extracted || null;
+        if (!self.defaultParams) self.defaultParams = extracted || null;
+      } catch (_e) {
+        self.scriptDefaults = null;
+      }
+      return self.scriptDefaults;
     }),
 
     process: flow(function* process(params) {
       self.ui.deHighlight();
       self.processing = true;
+
+      let buildParams = params;
+      if (buildParams === undefined && self.paramOverrides) {
+        if (!self.scriptDefaults) {
+          try {
+            self.scriptDefaults = yield api.extractDefaultParamsFromCode(
+              self.currentValues.code
+            );
+          } catch (_e) {
+            self.scriptDefaults = null;
+          }
+        }
+        buildParams = self.effectiveParams;
+      }
+
       try {
         const { shapes: mesh, compatibilityReplacements: replacements } =
           yield api.buildShapesFromCodeWithMetadata(
             self.currentValues.code,
-            params
+            buildParams
           );
         self.compatibilityWarning = replacements.length
           ? `OpenCascade compatibility mode was used (${replacements
@@ -107,8 +146,13 @@ const AppState = types
       }
 
       try {
-        self.defaultParams = yield api.extractDefaultParamsFromCode(
+        const extracted = yield api.extractDefaultParamsFromCode(
           self.currentValues.code
+        );
+        self.scriptDefaults = extracted || null;
+        self.defaultParams = applyPatchToConfig(
+          extracted,
+          self.paramOverrides
         );
       } catch (e) {
         console.log("no default params");
@@ -120,11 +164,21 @@ const AppState = types
   .extend((self) => {
     let disposer = null;
 
-    const processor = inSeries(self.process);
+    // Latest queued arguments win, and every caller waits for the run that
+    // includes its request. Code edits (the autorun below) and the external
+    // control API share this queue.
+    const queue = createRebuildQueue(async (params) => {
+      await self.process(params);
+      if (typeof window !== "undefined" && typeof window.dispatchEvent === "function") {
+        window.dispatchEvent(
+          new CustomEvent("replicad-studio", { detail: snapshotState(self) })
+        );
+      }
+    });
 
-    const run = async () => {
+    const run = () => {
       if (!self.currentValues.code) return;
-      await processor();
+      queue.enqueue();
     };
 
     return {
@@ -135,6 +189,14 @@ const AppState = types
 
         afterDestroy() {
           if (disposer) disposer();
+        },
+
+        rebuild(params) {
+          return queue.enqueue(params);
+        },
+
+        whenSettled() {
+          return queue.whenSettled();
         },
       },
     };

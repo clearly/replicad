@@ -117,6 +117,18 @@ export default observer(function EditorPane() {
     }
   }, [language]);
 
+  // Keep the buffer in sync when the script is replaced from outside
+  // (window.replicadStudio / postMessage). Typing still flows editor -> store;
+  // this only writes when the store has something the buffer does not.
+  const externalCode = store.code.current;
+  React.useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || externalCode == null) return;
+    const model = editor.getModel();
+    if (!model || model.getValue() === externalCode) return;
+    editor.setValue(externalCode);
+  }, [externalCode]);
+
   if (!store.code.initialized) return <LoadingScreen />;
 
   return (
