@@ -102,4 +102,5 @@ export interface EvaluatorService {
     edgeIndex: number,
     shapeId?: string
   ) => GenericRecord | null;
+  heapStats?: () => Promise<{ bytes: number }>;
 }

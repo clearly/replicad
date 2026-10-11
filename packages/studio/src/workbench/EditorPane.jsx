@@ -21,6 +21,7 @@ import { LinkEditor } from "../components/LinkEditor";
 import { Dialog, DialogTitle, DialogBody } from "../components/Dialog.jsx";
 import { useAutoload } from "./Autoload";
 import Reload from "../icons/Reload";
+import GrokPanel from "../grok/GrokPanel.jsx";
 
 export const ErrorOverlay = styled.div`
   display: flex;
@@ -57,6 +58,20 @@ const WarningOverlay = styled(ErrorOverlay)`
   & > :first-child {
     color: #d28b00;
   }
+`;
+
+const Column = styled.div`
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+`;
+
+const EditorRegion = styled.div`
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
 `;
 
 export default observer(function EditorPane() {
@@ -117,10 +132,23 @@ export default observer(function EditorPane() {
     }
   }, [language]);
 
+  // Keep the buffer in sync when the script is replaced from outside
+  // (window.replicadStudio / postMessage). Typing still flows editor -> store;
+  // this only writes when the store has something the buffer does not.
+  const externalCode = store.code.current;
+  React.useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || externalCode == null) return;
+    const model = editor.getModel();
+    if (!model || model.getValue() === externalCode) return;
+    editor.setValue(externalCode);
+  }, [externalCode]);
+
   if (!store.code.initialized) return <LoadingScreen />;
 
   return (
-    <>
+    <Column>
+      <EditorRegion>
       <Splitter
         direction={SplitDirection.Vertical}
         gutterTheme={GutterTheme.Dark}
@@ -159,7 +187,9 @@ export default observer(function EditorPane() {
           </WarningOverlay>
         ) : null}
       </Splitter>
-    </>
+      </EditorRegion>
+      <GrokPanel />
+    </Column>
   );
 });
 

@@ -115,7 +115,7 @@ export default observer(function VisualizerPane() {
           {store.ui.enableParams && store.defaultParams && (
             <ParamsEditor
               defaultParams={store.defaultParams}
-              onRun={store.process}
+              onRun={store.rebuild}
             />
           )}
         </InfoTopRight>
