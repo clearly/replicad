@@ -21,6 +21,33 @@ const createShapeMemory = () => Object.create(null) as Record<string, any[]>;
 
 const isModuleCode = (code: string) => MODULE_RE.test(code);
 
+export function wasmHeapBytes(oc: any): number {
+  if (!oc) return 0;
+  if (typeof oc.HEAP8?.byteLength === "number") return oc.HEAP8.byteLength;
+  if (typeof oc.HEAP8?.length === "number") return oc.HEAP8.length;
+  const memory = oc.wasmMemory?.buffer?.byteLength;
+  return typeof memory === "number" ? memory : 0;
+}
+
+/** Delete OpenCascade shapes from a previous build. Shapes still in `keep` stay. */
+export function releaseShapeList(entries: any[] | undefined, keep?: any[]) {
+  const retained = new Set(
+    (keep || []).map((entry) => entry?.shape).filter(Boolean)
+  );
+
+  (entries || []).forEach((entry) => {
+    const shape = entry?.shape ?? entry;
+    if (!shape || retained.has(shape) || typeof shape.delete !== "function") {
+      return;
+    }
+    try {
+      shape.delete();
+    } catch {
+      // The wrapper may already have been deleted by the script.
+    }
+  });
+}
+
 function formatException(oc: any, error: any) {
   let message = "error";
 
@@ -271,16 +298,29 @@ try {
       compatibility.restore();
     }
 
-    return renderOutput(shapes, {
+    let renderedShapes: any[] = [];
+    const output = renderOutput(shapes, {
       replicad: currentRuntime.replicad,
       shapeStandardizer: standardizer,
       beforeRender: (builtShapes) => {
         const editedShapes = helper.apply(builtShapes);
+        // Drop the previous build's kernel objects before meshing the new
+        // ones. The mesh handed back to the UI is plain numeric data, so the
+        // OpenCascade shapes only need to live on for export and picking.
+        releaseShapeList(shapesMemory.defaultShape, editedShapes);
         shapesMemory.defaultShape = builtShapes;
+        renderedShapes = editedShapes;
         return editedShapes;
       },
       defaultName,
     });
+
+    const kept = new Set(shapesMemory.defaultShape || []);
+    releaseShapeList(
+      renderedShapes.filter((entry) => !kept.has(entry)),
+      shapesMemory.defaultShape
+    );
+    return output;
   };
 
   const exportShape = async (
@@ -362,5 +402,9 @@ try {
     loadFont,
     faceInfo,
     edgeInfo,
+    heapStats: async () => {
+      const currentRuntime = await ensureRuntimeReady();
+      return { bytes: wasmHeapBytes(currentRuntime.oc) };
+    },
   };
 }

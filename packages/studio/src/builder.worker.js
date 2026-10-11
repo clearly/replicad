@@ -68,6 +68,15 @@ const service = {
   exportShape: (...args) => evaluator.exportShape(...args),
   edgeInfo: (...args) => evaluator.edgeInfo(...args),
   faceInfo: (...args) => evaluator.faceInfo(...args),
+  heapStats: async () => {
+    const oc = await ensureReplicadReady();
+    const bytes =
+      oc?.HEAP8?.byteLength ||
+      oc?.HEAP8?.length ||
+      oc?.wasmMemory?.buffer?.byteLength ||
+      0;
+    return { bytes };
+  },
 };
 
 expose(service, self);
