@@ -25,3 +25,6 @@ npm run serve
 
 But I would advise you to use a proper web server if you want to expose it to
 the web (this is a pure static website).
+
+Outside code can load a script, change parameters, and rebuild the open model
+without a page reload. See [docs/external-control.md](docs/external-control.md).

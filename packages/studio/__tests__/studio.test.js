@@ -1,7 +1,8 @@
-'use strict';
+import assert from "node:assert/strict";
+import test from "node:test";
 
-const studio = require('..');
-const assert = require('assert').strict;
+import { CHANNEL } from "../src/external/protocol.js";
 
-assert.strictEqual(studio(), 'Hello from studio');
-console.info('studio tests passed');
+test("studio external control channel is namespaced", () => {
+  assert.equal(CHANNEL, "replicad-studio");
+});
